@@ -1,10 +1,17 @@
 import { GameUpdate } from "./update";
-import { Day } from "./game";
+import {Day, Game} from "./game";
 import useSWR, {useSWRInfinite} from "swr";
 import {useEffect, useState} from "react";
 
+// empty string local, also try eg. https://blase.srv.astr.cc/
+const BASE_URL = "";
+
 export interface GamesResponse {
     days: Day[]
+}
+
+export interface EventsResponse {
+    games: Game[]
 }
 
 export interface GameUpdatesResponse {
@@ -24,7 +31,7 @@ export function useGameList(season: number, pageSize: number) {
             // at the end! :)
             return null;
 
-        return `/api/games?season=${season-1}&day=${startDay}&dayCount=${pageSize}&reverse=true`
+        return BASE_URL + `/api/games?season=${season-1}&day=${startDay}&dayCount=${pageSize}&reverse=true`
     }
 
     const { data, size, setSize, error } = useSWRInfinite<GamesResponse>(getNextPage, {
@@ -51,7 +58,7 @@ interface GameUpdatesHookReturn {
 
 export function useGameUpdates(game: string, autoRefresh: boolean): GameUpdatesHookReturn {
     // First load of original data
-    const { data: initialData, error } = useSWR<GameUpdatesResponse>(`/api/games/${game}/updates`,  {revalidateOnFocus: false});
+    const { data: initialData, error } = useSWR<GameUpdatesResponse>(BASE_URL + `/api/games/${game}/updates`,  {revalidateOnFocus: false});
     
     // Updates added via autoupdating
     const [extraUpdates, setExtraUpdates] = useState<GameUpdate[]>([]);
@@ -71,7 +78,7 @@ export function useGameUpdates(game: string, autoRefresh: boolean): GameUpdatesH
             const lastUpdate = allUpdates[allUpdates.length - 1];
             const lastTimestamp = lastUpdate.timestamp;
             
-            const url = `/api/games/${game}/updates?after=${encodeURIComponent(lastTimestamp)}`;
+            const url = BASE_URL + `/api/games/${game}/updates?after=${encodeURIComponent(lastTimestamp)}`;
             const response = await fetch(url);
             const json = <GameUpdatesResponse>(await response.json());
             
@@ -86,4 +93,39 @@ export function useGameUpdates(game: string, autoRefresh: boolean): GameUpdatesH
         isLoading: !initialData,
         error
     }
+}
+
+
+interface GameEventsHookReturn {
+    games: Game[];
+    error: any;
+    isLoading: boolean;
+    nextPage: () => void;
+    hasMoreData: boolean;
+}
+
+
+export function useGameEvents(): GameEventsHookReturn {
+    function getNextPage(pageIndex: number, previousPageData: EventsResponse | null) {
+        if (previousPageData == null)
+            return BASE_URL + "/api/events";
+        if (previousPageData?.games.length == 0)
+            return null;
+        
+        const games = previousPageData?.games ?? [];
+        const lastGameTimestamp = games[games?.length-1].lastUpdateTime;
+
+        return BASE_URL + `/api/events?before=${encodeURIComponent(lastGameTimestamp)}`;
+    }
+    
+    const { data, error, size, setSize } = useSWRInfinite<EventsResponse>(getNextPage,  {revalidateOnFocus: false});
+    
+    const games = data && data.map(page => page.games).flat();
+    return {
+        games: games ?? [],
+        error, 
+        isLoading: !data,
+        nextPage: () => setSize(size + 1),
+        hasMoreData: data ? data[data.length-1].games.length > 0 : true
+    };
 }

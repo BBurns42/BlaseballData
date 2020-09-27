@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Conventions;
 using MongoDB.Driver;
 using Serilog;
 
@@ -15,6 +16,7 @@ namespace Blase.Core
         private IMongoCollection<GameUpdate> _gameUpdates;
         private IMongoCollection<RawUpdate> _rawUpdates;
         private IMongoCollection<IdolsUpdate> _idolUpdates;
+        private IMongoCollection<TributesUpdate> _tributesUpdate;
         private IMongoCollection<IdolsHourly> _idolUpdatesHourly;
         private IMongoCollection<TeamUpdate> _teamUpdates;
         private IMongoCollection<PlayerUpdate> _playerUpdates;
@@ -35,6 +37,7 @@ namespace Blase.Core
             _gameUpdates = _db.GetCollection<GameUpdate>("gameupdates2");
             _rawUpdates = _db.GetCollection<RawUpdate>("rawupdates2");
             _idolUpdates = _db.GetCollection<IdolsUpdate>("idols");
+            _tributesUpdate = _db.GetCollection<TributesUpdate>("tributes");
             _teamUpdates = _db.GetCollection<TeamUpdate>("teams");
             _playerUpdates = _db.GetCollection<PlayerUpdate>("players");
             _jsUpdates = _db.GetCollection<JsUpdate>("js");
@@ -153,6 +156,21 @@ namespace Blase.Core
             public DateTimeOffset? Start;
         }
 
+        public IAsyncEnumerable<Game> GetGamesWithOutcomes(DateTimeOffset? before)
+        {
+            var filter = new BsonDocument
+            {
+                {"lastUpdate.outcomes", new BsonDocument("$ne", new BsonArray())},
+            };
+            if (before != null)
+                filter.Add("lastUpdateTime", new BsonDocument("$lt", new BsonDateTime(before.Value.UtcDateTime)));
+            
+            return _games.FindAsync(filter, new FindOptions<Game>
+            {
+                Sort = Builders<Game>.Sort.Descending(g => g.LastUpdateTime)
+            }).ToAsyncEnumerable();
+        }
+
         public IAsyncEnumerable<GameDay> GetGamesByDay(int season, int dayStart, bool reverse)
         {
             var filter = reverse
@@ -217,6 +235,17 @@ namespace Blase.Core
             await _idolUpdates.UpdateOneAsync(filter, model, new UpdateOptions {IsUpsert = true});
 
             await UpdateIdolsHourly(update);
+        }
+        
+        public async Task WriteTributesUpdate(TributesUpdate update)
+        {
+            var filter = Builders<TributesUpdate>.Filter.Eq(x => x.Id, update.Id);
+            
+            var model = Builders<TributesUpdate>.Update
+                .SetOnInsert(x => x.Payload, update.Payload)
+                .Min(x => x.FirstSeen, update.FirstSeen)
+                .Max(x => x.LastSeen, update.LastSeen);
+            await _tributesUpdate.UpdateOneAsync(filter, model, new UpdateOptions {IsUpsert = true});
         }
 
         private async Task UpdateIdolsHourly(IdolsUpdate update)
@@ -297,6 +326,33 @@ namespace Blase.Core
         public IAsyncEnumerable<IdolsHourly> GetIdolsHourly()
         {
             return _idolUpdatesHourly.FindAsync(new BsonDocument()).ToAsyncEnumerable();
+        }
+
+        public IAsyncEnumerable<TeamUpdate> GetTeamUpdates(Guid team, DateTimeOffset? before, DateTimeOffset? after, int order)
+        {
+            var filter = Builders<TeamUpdate>.Filter.Eq(u => u.TeamId, team);
+            if (before != null)
+                filter &= Builders<TeamUpdate>.Filter.Lt(u => u.FirstSeen, before.Value);
+            if (after != null)
+                filter &= Builders<TeamUpdate>.Filter.Gt(u => u.FirstSeen, after.Value);
+
+            return _teamUpdates
+                .FindAsync(filter, new FindOptions<TeamUpdate>
+                {
+                    Sort = new BsonDocument("firstSeen", order)
+                })
+                .ToAsyncEnumerable();
+        }
+
+        public async Task<List<Guid>> GetKnownPlayerIds()
+        {
+            var players = await _playerUpdates
+                .Aggregate()
+                .Group(@"{_id: '$player'}")
+                .ToListAsync();
+            return players
+                .Select(doc => doc["_id"].AsGuidString())
+                .ToList();
         }
     }
 }

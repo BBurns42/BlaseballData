@@ -6,18 +6,18 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace Blase.Core
 {
-    public class IdolsUpdate
+    public class TributesUpdate
     {
         [BsonId] public string Id;
         [BsonElement("firstSeen")] public DateTimeOffset FirstSeen;
         [BsonElement("lastSeen")] public DateTimeOffset LastSeen;
         [BsonElement("payload")] public BsonValue Payload;
 
-        public IdolsUpdate()
+        public TributesUpdate()
         {
         }
 
-        public IdolsUpdate(DateTimeOffset timestamp, JsonElement payload)
+        public TributesUpdate(DateTimeOffset timestamp, JsonElement payload)
         {
             // Id = JsonHash.HashHex(payload); // temporarily don't store by hash...
             Id = Guid.NewGuid().ToString();
